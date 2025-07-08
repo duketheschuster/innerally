@@ -216,68 +216,82 @@ else:
     # Right Column: Chat Interface
     # ----------------------
     with right_col:
-        st.subheader("💬 Chat")
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+    st.subheader("💬 Chat")
 
-        if prompt := st.chat_input("Talk to InnerAlly..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    # Display all chat history first
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-            with st.spinner("InnerAlly is responding..."):
-                try:
-                    if not st.session_state.thread_id:
-                        thread = client.beta.threads.create()
-                        st.session_state.thread_id = thread.id
+    # Get new user input
+    prompt = st.chat_input("Talk to InnerAlly...")
 
-                    if len(st.session_state.messages) == 1:
-                        with sqlite3.connect(DB_PATH) as conn:
-                            cur = conn.execute("SELECT name, core_values, emotional_triggers FROM onboarding WHERE id = 1")
-                            row = cur.fetchone()
-                            if row:
-                                context = f"User Info:\nName: {row[0]}\nCore Values: {row[1]}\nEmotional Triggers: {row[2]}"
-                                client.beta.threads.messages.create(
-                                    thread_id=st.session_state.thread_id,
-                                    role="user",
-                                    content=context
-                                )
+    if prompt:
+        # Display user message immediately
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-                    client.beta.threads.messages.create(
+        with st.spinner("InnerAlly is responding..."):
+            try:
+                # Create a new thread if one doesn't exist
+                if not st.session_state.thread_id:
+                    thread = client.beta.threads.create()
+                    st.session_state.thread_id = thread.id
+
+                # Add onboarding context at the start of the conversation
+                if len(st.session_state.messages) == 1:
+                    with sqlite3.connect(DB_PATH) as conn:
+                        cur = conn.execute("SELECT name, core_values, emotional_triggers FROM onboarding WHERE id = 1")
+                        row = cur.fetchone()
+                        if row:
+                            context = f"User Info:\nName: {row[0]}\nCore Values: {row[1]}\nEmotional Triggers: {row[2]}"
+                            client.beta.threads.messages.create(
+                                thread_id=st.session_state.thread_id,
+                                role="user",
+                                content=context
+                            )
+
+                # Send user prompt to thread
+                client.beta.threads.messages.create(
+                    thread_id=st.session_state.thread_id,
+                    role="user",
+                    content=prompt
+                )
+
+                # Start assistant run
+                run = client.beta.threads.runs.create(
+                    thread_id=st.session_state.thread_id,
+                    assistant_id=ASSISTANT_ID
+                )
+
+                # Poll until complete
+                while True:
+                    run_status = client.beta.threads.runs.retrieve(
                         thread_id=st.session_state.thread_id,
-                        role="user",
-                        content=prompt
+                        run_id=run.id
                     )
+                    if run_status.status == "completed":
+                        break
+                    elif run_status.status == "failed":
+                        error_msg = run_status.last_error.get("message", "Unknown error")
+                        st.error(f"Assistant run failed: {error_msg}")
+                        st.stop()
+                    time.sleep(0.5)
 
-                    run = client.beta.threads.runs.create(
-                        thread_id=st.session_state.thread_id,
-                        assistant_id=ASSISTANT_ID
-                    )
+                # Fetch latest reply
+                messages = client.beta.threads.messages.list(
+                    thread_id=st.session_state.thread_id
+                )
+                reply = messages.data[0].content[0].text.value
 
-                    while True:
-                        run_status = client.beta.threads.runs.retrieve(
-                            thread_id=st.session_state.thread_id,
-                            run_id=run.id
-                        )
-                        if run_status.status == "completed":
-                            break
-                        elif run_status.status == "failed":
-                            st.error("Assistant run failed")
-                            st.stop()
-                        time.sleep(0.5)
+                # Append and display
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
 
-                    messages = client.beta.threads.messages.list(
-                        thread_id=st.session_state.thread_id
-                    )
-                    reply = messages.data[0].content[0].text.value
-
-                    st.session_state.messages.append({"role": "assistant", "content": reply})
-                    with st.chat_message("assistant"):
-                        st.markdown(reply)
-
-                except Exception as e:
-                    st.error(f"Failed to get response: {e}")
+            except Exception as e:
+                st.error(f"Failed to get response: {e}")
 
 # ----------------------
 # .env.example (put in project root, NOT .env!)
