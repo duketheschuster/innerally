@@ -216,30 +216,32 @@ else:
     # Right Column: Chat Interface
     # ----------------------
     with right_col:
-        st.subheader("💬 Chat")
+    st.subheader("💬 Chat with InnerAlly")
 
-    # Display all chat history first
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    # Display messages inside an expandable container
+    with st.container():
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-    # Get new user input
-    prompt = st.chat_input("Talk to InnerAlly...")
+    # Custom input field at bottom of right column
+    with st.form("chat_form"):
+        user_input = st.text_input("Talk to InnerAlly...", key="chat_input")
+        submit = st.form_submit_button("Send")
 
-    if prompt:
-        # Display user message immediately
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if submit and user_input:
+        # Display user message
+        st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_input)
 
         with st.spinner("InnerAlly is responding..."):
             try:
-                # Create a new thread if one doesn't exist
                 if not st.session_state.thread_id:
                     thread = client.beta.threads.create()
                     st.session_state.thread_id = thread.id
 
-                # Add onboarding context at the start of the conversation
+                # Add onboarding context at start
                 if len(st.session_state.messages) == 1:
                     with sqlite3.connect(DB_PATH) as conn:
                         cur = conn.execute("SELECT name, core_values, emotional_triggers FROM onboarding WHERE id = 1")
@@ -252,20 +254,17 @@ else:
                                 content=context
                             )
 
-                # Send user prompt to thread
                 client.beta.threads.messages.create(
                     thread_id=st.session_state.thread_id,
                     role="user",
-                    content=prompt
+                    content=user_input
                 )
 
-                # Start assistant run
                 run = client.beta.threads.runs.create(
                     thread_id=st.session_state.thread_id,
                     assistant_id=ASSISTANT_ID
                 )
 
-                # Poll until complete
                 while True:
                     run_status = client.beta.threads.runs.retrieve(
                         thread_id=st.session_state.thread_id,
@@ -279,13 +278,11 @@ else:
                         st.stop()
                     time.sleep(0.5)
 
-                # Fetch latest reply
                 messages = client.beta.threads.messages.list(
                     thread_id=st.session_state.thread_id
                 )
                 reply = messages.data[0].content[0].text.value
 
-                # Append and display
                 st.session_state.messages.append({"role": "assistant", "content": reply})
                 with st.chat_message("assistant"):
                     st.markdown(reply)
