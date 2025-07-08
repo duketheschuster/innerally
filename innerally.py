@@ -87,18 +87,17 @@ else:
     if "chat_key" not in st.session_state:
         st.session_state.chat_key = 0
 
-    # --- Chat at top ---
-    st.subheader("💬 Chat with InnerAlly")
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    col1, col2 = st.columns([3, 1])
 
-    chat_container = st.container()
-    with chat_container:
+    with col1:
+        st.subheader("💬 Chat with InnerAlly")
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
         user_input = st.chat_input("Talk to InnerAlly...")
         if user_input:
             st.session_state.messages.append({"role": "user", "content": user_input})
-            st.session_state.chat_key += 1  # Causes text input to reset
             with st.chat_message("user"):
                 st.markdown(user_input)
 
@@ -156,62 +155,58 @@ else:
                 except Exception as e:
                     st.error(f"Failed to get response: {e}")
 
-    # --- Daily Mood Check-in ---
-st.subheader("📋 Daily Mood Check-in")
-with st.form("checkin_form"):
-    mood = st.selectbox("How are you feeling today?", ["😊 Happy", "😐 Neutral", "😟 Sad", "😠 Angry", "😰 Anxious"])
-    checkin_submit = st.form_submit_button("Submit Mood")
-    if checkin_submit:
+    with col2:
+        st.sidebar.header("📋 Daily Mood Check-in")
+        with st.sidebar.form("checkin_form"):
+            mood = st.selectbox("How are you feeling today?", ["😊 Happy", "😐 Neutral", "😟 Sad", "😠 Angry", "😰 Anxious"])
+            checkin_submit = st.form_submit_button("Submit Mood")
+            if checkin_submit:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO checkins (mood) VALUES (?)", (mood,))
+                st.sidebar.success("Mood check-in saved!")
+
+        st.sidebar.header("📓 Daily Journal")
+        with st.sidebar.form("journal_form"):
+            journal_text = st.text_area("Write about your day...")
+            journal_submit = st.form_submit_button("Save Journal Entry")
+            if journal_submit:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO journal (entry) VALUES (?)", (journal_text,))
+                st.sidebar.success("Journal entry saved!")
+
+        st.sidebar.header("🛠️ Healing Map Entry")
+        with st.sidebar.form("healing_form"):
+            emotional_intensity = st.slider("Emotional Intensity", 1, 10)
+            triggers = st.text_input("Trigger?")
+            tools = st.text_input("Tool used?")
+            healing_submit = st.form_submit_button("Save Healing Entry")
+            if healing_submit:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO healing_entries (emotional_intensity, triggers, tools) VALUES (?, ?, ?)",
+                                 (emotional_intensity, triggers, tools))
+                st.sidebar.success("Healing entry saved!")
+
+        st.sidebar.header("📈 Mood Trends")
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT INTO checkins (mood) VALUES (?)", (mood,))
-        st.success("Mood check-in saved!")
+            df_mood = pd.read_sql_query("SELECT * FROM checkins", conn, parse_dates=["timestamp"])
+        if not df_mood.empty:
+            df_mood["date"] = pd.to_datetime(df_mood["timestamp"]).dt.date
+            chart_data = df_mood.groupby("date")["mood"].agg(lambda x: x.value_counts().idxmax()).reset_index()
+            chart_data["mood"] = chart_data["mood"].str.extract(r"([a-zA-Z]+)")
+            mood_chart = alt.Chart(chart_data).mark_line(point=True).encode(
+                x="date:T",
+                y=alt.Y("mood:N", sort=None),
+                tooltip=["date", "mood"]
+            ).properties(height=200)
+            st.sidebar.altair_chart(mood_chart, use_container_width=True)
+        else:
+            st.sidebar.info("No mood data to display yet.")
 
-# --- Daily Journal Entry ---
-st.subheader("📓 Daily Journal")
-with st.form("journal_form"):
-    journal_text = st.text_area("Write about your day...")
-    journal_submit = st.form_submit_button("Save Journal Entry")
-    if journal_submit:
+        st.sidebar.header("🕰️ Journal History")
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT INTO journal (entry) VALUES (?)", (journal_text,))
-        st.success("Journal entry saved!")
-
-# --- Healing Entry ---
-st.subheader("🛠️ Healing Map Entry")
-with st.form("healing_form"):
-    emotional_intensity = st.slider("Emotional Intensity (1 = low, 10 = high)", 1, 10)
-    triggers = st.text_input("What triggered the emotion?")
-    tools = st.text_input("What tool did you use to regulate?")
-    healing_submit = st.form_submit_button("Save Healing Entry")
-    if healing_submit:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT INTO healing_entries (emotional_intensity, triggers, tools) VALUES (?, ?, ?)",
-                         (emotional_intensity, triggers, tools))
-        st.success("Healing entry saved!")
-
-# --- Mood Trends ---
-st.subheader("📈 Mood Trends")
-with sqlite3.connect(DB_PATH) as conn:
-    df_mood = pd.read_sql_query("SELECT * FROM checkins", conn, parse_dates=["timestamp"])
-
-if not df_mood.empty:
-    df_mood["date"] = pd.to_datetime(df_mood["timestamp"]).dt.date
-    chart_data = df_mood.groupby("date")["mood"].agg(lambda x: x.value_counts().idxmax()).reset_index()
-    chart_data["mood"] = chart_data["mood"].str.extract(r"([a-zA-Z]+)")
-    mood_chart = alt.Chart(chart_data).mark_line(point=True).encode(
-        x="date:T",
-        y=alt.Y("mood:N", sort=None),
-        tooltip=["date", "mood"]
-    ).properties(height=300)
-    st.altair_chart(mood_chart, use_container_width=True)
-else:
-    st.info("No mood data to display yet.")
-
-# --- Journal History ---
-st.subheader("🕰️ Journal History")
-with sqlite3.connect(DB_PATH) as conn:
-    df_journal = pd.read_sql_query("SELECT * FROM journal ORDER BY timestamp DESC", conn)
-
-if not df_journal.empty:
-    for _, row in df_journal.iterrows():
-        st.markdown(f"**{row['timestamp']}**\n\n{row['entry']}")
+            df_journal = pd.read_sql_query("SELECT * FROM journal ORDER BY timestamp DESC", conn)
+        if not df_journal.empty:
+            for _, row in df_journal.iterrows():
+                st.sidebar.markdown(f"**{row['timestamp']}**\\n\\n{row['entry']}")
+        else:
+            st.sidebar.info("No journal entries found.")
