@@ -217,28 +217,3 @@ if not df_journal.empty:
         st.markdown(f"**{row['timestamp']}**
 
 {row['entry']}")
-else:
-    st.info("No journal entries found.")
-
-# --- Healing Radial Chart ---
-st.subheader("📊 Healing Insights")
-with sqlite3.connect(DB_PATH) as conn:
-    df_healing = pd.read_sql_query("SELECT * FROM healing_entries", conn)
-
-if not df_healing.empty:
-    df_summary = pd.DataFrame({
-        "Metric": ["Avg Intensity", "Most Common Trigger", "Most Used Tool"],
-        "Value": [
-            round(df_healing["emotional_intensity"].mean(), 2),
-            df_healing["triggers"].mode()[0] if not df_healing["triggers"].mode().empty else "N/A",
-            df_healing["tools"].mode()[0] if not df_healing["tools"].mode().empty else "N/A"
-        ]
-    })
-    radial = alt.Chart(df_summary).mark_arc(innerRadius=20).encode(
-        theta=alt.Theta(field="Value", type="quantitative", stack=True),
-        color="Metric:N",
-        tooltip=["Metric", "Value"]
-    ).properties(height=300)
-    st.altair_chart(radial, use_container_width=True)
-else:
-    st.info("Not enough healing data to show insights.")
