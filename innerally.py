@@ -84,6 +84,9 @@ else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    if "chat_key" not in st.session_state:
+        st.session_state.chat_key = 0
+
     # --- Chat at top ---
     st.subheader("💬 Chat with InnerAlly")
     for msg in st.session_state.messages:
@@ -92,10 +95,10 @@ else:
 
     chat_container = st.container()
     with chat_container:
-        user_input = st.text_input("Talk to InnerAlly...", key="chat_input")
+        user_input = st.text_input("Talk to InnerAlly...", key=f"chat_input_{st.session_state.chat_key}")
         if st.button("Send", key="send_button") and user_input:
             st.session_state.messages.append({"role": "user", "content": user_input})
-            st.session_state.chat_input = ""
+            st.session_state.chat_key += 1  # Causes text input to reset
             with st.chat_message("user"):
                 st.markdown(user_input)
 
