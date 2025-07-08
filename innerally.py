@@ -68,11 +68,15 @@ if not st.session_state.onboarded:
         emotional_triggers = st.text_area("What emotional triggers should I be aware of?")
         submitted = st.form_submit_button("Save and Start")
         if submitted:
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("REPLACE INTO onboarding (id, name, core_values, emotional_triggers) VALUES (1, ?, ?, ?)",
-                             (name, core_values, emotional_triggers))
-            st.session_state.onboarded = True
-            st.rerun()
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("REPLACE INTO onboarding (id, name, core_values, emotional_triggers) VALUES (1, ?, ?, ?)",
+                                 (name, core_values, emotional_triggers))
+                st.session_state.onboarded = True
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to save onboarding data: {e}")
+
 else:
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = None
@@ -80,157 +84,17 @@ else:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Layout with sidebar for tools
-    left_col, right_col = st.columns([1, 2])
+    # --- Chat at top ---
+    st.subheader("💬 Chat with InnerAlly")
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    # ----------------------
-    # Sidebar Tools: Daily Check-In, Journal, Healing Map
-    # ----------------------
-    with left_col:
-        st.subheader("📅 Daily Check-In")
-        mood = st.radio("How are you feeling today?", ["😊 Good", "😐 Okay", "😞 Not great"])
-        if st.button("Submit Check-In"):
-            try:
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("INSERT INTO checkins (mood) VALUES (?)", (mood,))
-                st.success(f"Your check-in for today is recorded: {mood}")
-            except Exception as e:
-                st.error(f"Error saving check-in: {e}")
-
-        # Mood trend chart
-        st.subheader("📈 Mood Trends")
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                df = pd.read_sql_query("SELECT mood, timestamp FROM checkins ORDER BY timestamp", conn)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                chart = alt.Chart(df).mark_line(point=True).encode(
-                    x='timestamp:T',
-                    y=alt.Y('mood:N', sort=["😞 Not great", "😐 Okay", "😊 Good"]),
-                    tooltip=['timestamp:T', 'mood:N']
-                ).properties(height=200)
-                st.altair_chart(chart, use_container_width=True)
-        except Exception as e:
-            st.error(f"Error loading mood trends: {e}")
-
-        # --- Journal + Healing Entry Form ---
-        st.subheader("📓 Daily Journal & Healing Entry")
-
-        # Load triggers from onboarding DB
-        with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT emotional_triggers FROM onboarding WHERE id = 1").fetchone()
-            triggers_list = []
-            if row and row[0]:
-                triggers_list = [t.strip() for t in row[0].replace('\n', ',').split(',') if t.strip()]
-
-        healing_tools = [
-            "Journaling",
-            "Deep Breathing",
-            "Meditation",
-            "Exercise",
-            "Talking with Friend",
-            "Creative Expression",
-            "Nature Walk",
-            "Mindfulness",
-        ]
-
-        with st.form("journal_healing_form"):
-            journal_text = st.text_area("Write your thoughts:", height=150)
-            emotional_intensity = st.slider("Rate your emotional intensity (1 = low, 5 = high)", 1, 5, 3)
-            selected_triggers = st.multiselect("Select emotional triggers you experienced", options=triggers_list)
-            selected_tools = st.multiselect("Which healing tools did you use?", options=healing_tools)
-            submitted = st.form_submit_button("Save Journal & Healing Entry")
-
-            if submitted and journal_text:
-                try:
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.execute("INSERT INTO journal (entry) VALUES (?)", (journal_text,))
-                        conn.execute(
-                            "INSERT INTO healing_entries (emotional_intensity, triggers, tools) VALUES (?, ?, ?)",
-                            (
-                                emotional_intensity,
-                                ",".join(selected_triggers),
-                                ",".join(selected_tools),
-                            ),
-                        )
-                    st.success("Journal entry and healing data saved.")
-                except Exception as e:
-                    st.error(f"Error saving entries: {e}")
-
-        # Journal History
-        st.subheader("📚 Journal History")
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                journal_entries = conn.execute("SELECT timestamp, entry FROM journal ORDER BY timestamp DESC").fetchall()
-            for timestamp, entry in journal_entries:
-                st.markdown(f"**{timestamp}**\n\n{entry}")
-        except Exception as e:
-            st.error(f"Error loading journal entries: {e}")
-
-        # Healing Map Radial Chart
-        st.subheader("🗺️ Healing Map Radial Chart")
-
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                df = pd.read_sql_query("SELECT emotional_intensity, triggers, tools FROM healing_entries ORDER BY timestamp DESC LIMIT 30", conn)
-
-            if not df.empty:
-                df['triggers_list'] = df['triggers'].apply(lambda x: x.split(',') if x else [])
-                df['tools_list'] = df['tools'].apply(lambda x: x.split(',') if x else [])
-
-                unique_triggers = sorted(set(t for sublist in df['triggers_list'] for t in sublist if t))
-                unique_tools = sorted(set(t for sublist in df['tools_list'] for t in sublist if t))
-
-                data = []
-
-                avg_intensity = df['emotional_intensity'].mean()
-                data.append({"category": "Emotional Intensity", "value": avg_intensity})
-
-                for trig in unique_triggers:
-                    freq = df['triggers_list'].apply(lambda lst: trig in lst).mean() * 5
-                    data.append({"category": f"Trigger: {trig}", "value": freq})
-
-                for tool in unique_tools:
-                    freq = df['tools_list'].apply(lambda lst: tool in lst).mean() * 5
-                    data.append({"category": f"Tool: {tool}", "value": freq})
-
-                chart_df = pd.DataFrame(data)
-
-                chart = (
-                    alt.Chart(chart_df)
-                    .mark_line(point=True)
-                    .encode(
-                        theta=alt.Theta("category:N", sort=chart_df["category"].tolist()),
-                        radius=alt.Radius("value:Q", scale=alt.Scale(type="linear", domain=[0, 5])),
-                        tooltip=["category", alt.Tooltip("value", format=".2f")],
-                    )
-                    .properties(width=400, height=400)
-                )
-                st.altair_chart(chart)
-            else:
-                st.info("Add some healing entries to see your Healing Map here.")
-
-        except Exception as e:
-            st.error(f"Error loading Healing Map: {e}")
-
-    # ----------------------
-    # Right Column: Chat Interface
-    # ----------------------
-    with right_col:
-        st.subheader("💬 Chat with InnerAlly")
-
-    # Display messages inside an expandable container
-    with st.container():
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-    # Custom input field at bottom of right column
     with st.form("chat_form"):
         user_input = st.text_input("Talk to InnerAlly...", key="chat_input")
         submit = st.form_submit_button("Send")
 
     if submit and user_input:
-        # Display user message
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
@@ -241,7 +105,6 @@ else:
                     thread = client.beta.threads.create()
                     st.session_state.thread_id = thread.id
 
-                # Add onboarding context at start
                 if len(st.session_state.messages) == 1:
                     with sqlite3.connect(DB_PATH) as conn:
                         cur = conn.execute("SELECT name, core_values, emotional_triggers FROM onboarding WHERE id = 1")
@@ -290,8 +153,111 @@ else:
             except Exception as e:
                 st.error(f"Failed to get response: {e}")
 
-# ----------------------
+    # --- Daily Check-In ---
+    st.subheader("📅 Daily Check-In")
+    mood = st.radio("How are you feeling today?", ["😊 Good", "😐 Okay", "😞 Not great"])
+    if st.button("Submit Check-In"):
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("INSERT INTO checkins (mood) VALUES (?)", (mood,))
+            st.success(f"Your check-in for today is recorded: {mood}")
+        except Exception as e:
+            st.error(f"Error saving check-in: {e}")
+
+    # --- Journal and Healing Entry ---
+    st.subheader("📓 Daily Journal & Healing Entry")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT emotional_triggers FROM onboarding WHERE id = 1").fetchone()
+        triggers_list = [t.strip() for t in row[0].replace('\n', ',').split(',') if t.strip()] if row and row[0] else []
+
+    healing_tools = [
+        "Journaling", "Deep Breathing", "Meditation", "Exercise",
+        "Talking with Friend", "Creative Expression", "Nature Walk", "Mindfulness"
+    ]
+
+    with st.form("journal_healing_form"):
+        journal_text = st.text_area("Write your thoughts:", height=150)
+        emotional_intensity = st.slider("Rate your emotional intensity (1 = low, 5 = high)", 1, 5, 3)
+        selected_triggers = st.multiselect("Select emotional triggers you experienced", options=triggers_list)
+        selected_tools = st.multiselect("Which healing tools did you use?", options=healing_tools)
+        submitted = st.form_submit_button("Save Journal & Healing Entry")
+
+        if submitted and journal_text:
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO journal (entry) VALUES (?)", (journal_text,))
+                    conn.execute("INSERT INTO healing_entries (emotional_intensity, triggers, tools) VALUES (?, ?, ?)",
+                                 (emotional_intensity, ",".join(selected_triggers), ",".join(selected_tools)))
+                st.success("Journal entry and healing data saved.")
+            except Exception as e:
+                st.error(f"Error saving entries: {e}")
+
+    # --- Mood Trends ---
+    st.subheader("📈 Mood Trends")
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query("SELECT mood, timestamp FROM checkins ORDER BY timestamp", conn)
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            chart = alt.Chart(df).mark_line(point=True).encode(
+                x='timestamp:T',
+                y=alt.Y('mood:N', sort=["😞 Not great", "😐 Okay", "😊 Good"]),
+                tooltip=['timestamp:T', 'mood:N']
+            ).properties(height=200)
+            st.altair_chart(chart, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error loading mood trends: {e}")
+
+    # --- Journal History ---
+    st.subheader("📚 Journal History")
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            journal_entries = conn.execute("SELECT timestamp, entry FROM journal ORDER BY timestamp DESC").fetchall()
+        for timestamp, entry in journal_entries:
+            st.markdown(f"**{timestamp}**\n\n{entry}")
+    except Exception as e:
+        st.error(f"Error loading journal entries: {e}")
+
+    # --- Healing Map Radial Chart ---
+    st.subheader("🗺️ Healing Map Radial Chart")
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query("SELECT emotional_intensity, triggers, tools FROM healing_entries ORDER BY timestamp DESC LIMIT 30", conn)
+
+        if not df.empty:
+            df['triggers_list'] = df['triggers'].apply(lambda x: x.split(',') if x else [])
+            df['tools_list'] = df['tools'].apply(lambda x: x.split(',') if x else [])
+
+            unique_triggers = sorted(set(t for sublist in df['triggers_list'] for t in sublist if t))
+            unique_tools = sorted(set(t for sublist in df['tools_list'] for t in sublist if t))
+
+            data = []
+            avg_intensity = df['emotional_intensity'].mean()
+            data.append({"category": "Emotional Intensity", "value": avg_intensity})
+
+            for trig in unique_triggers:
+                freq = df['triggers_list'].apply(lambda lst: trig in lst).mean() * 5
+                data.append({"category": f"Trigger: {trig}", "value": freq})
+
+            for tool in unique_tools:
+                freq = df['tools_list'].apply(lambda lst: tool in lst).mean() * 5
+                data.append({"category": f"Tool: {tool}", "value": freq})
+
+            chart_df = pd.DataFrame(data)
+
+            chart = alt.Chart(chart_df).mark_line(point=True).encode(
+                theta=alt.Theta("category:N", sort=chart_df["category"].tolist()),
+                radius=alt.Radius("value:Q", scale=alt.Scale(type="linear", domain=[0, 5])),
+                tooltip=["category", alt.Tooltip("value", format=".2f")],
+            ).properties(width=400, height=400)
+
+            st.altair_chart(chart)
+        else:
+            st.info("Add some healing entries to see your Healing Map here.")
+
+    except Exception as e:
+        st.error(f"Error loading Healing Map: {e}")
+
 # .env.example (put in project root, NOT .env!)
-# ----------------------
 # OPENAI_API_KEY=your_openai_key_here
 # ASSISTANT_ID=your_assistant_id_here
