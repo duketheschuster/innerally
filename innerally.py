@@ -72,7 +72,7 @@ if not st.session_state.onboarded:
                 conn.execute("REPLACE INTO onboarding (id, name, core_values, emotional_triggers) VALUES (1, ?, ?, ?)",
                              (name, core_values, emotional_triggers))
             st.session_state.onboarded = True
-            st.experimental_rerun()
+            st.rerun()
 else:
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = None
