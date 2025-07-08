@@ -214,6 +214,4 @@ with sqlite3.connect(DB_PATH) as conn:
 
 if not df_journal.empty:
     for _, row in df_journal.iterrows():
-        st.markdown(f"**{row['timestamp']}**
-
-{row['entry']}")
+        st.markdown(f"**{row['timestamp']}**\n\n{row['entry']}")
