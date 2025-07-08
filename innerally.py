@@ -216,7 +216,7 @@ else:
     # Right Column: Chat Interface
     # ----------------------
     with right_col:
-    st.subheader("💬 Chat")
+        st.subheader("💬 Chat")
 
     # Display all chat history first
     for msg in st.session_state.messages:
