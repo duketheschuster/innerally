@@ -95,8 +95,8 @@ else:
 
     chat_container = st.container()
     with chat_container:
-        user_input = st.text_input("Talk to InnerAlly...", key=f"chat_input_{st.session_state.chat_key}")
-        if st.button("Send", key="send_button") and user_input:
+        user_input = st.chat_input("Talk to InnerAlly...")
+        if user_input:
             st.session_state.messages.append({"role": "user", "content": user_input})
             st.session_state.chat_key += 1  # Causes text input to reset
             with st.chat_message("user"):
@@ -156,4 +156,89 @@ else:
                 except Exception as e:
                     st.error(f"Failed to get response: {e}")
 
-    # [Remaining unchanged code continues here for check-in, journal, data...]
+    # --- Daily Mood Check-in ---
+st.subheader("📋 Daily Mood Check-in")
+with st.form("checkin_form"):
+    mood = st.selectbox("How are you feeling today?", ["😊 Happy", "😐 Neutral", "😟 Sad", "😠 Angry", "😰 Anxious"])
+    checkin_submit = st.form_submit_button("Submit Mood")
+    if checkin_submit:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO checkins (mood) VALUES (?)", (mood,))
+        st.success("Mood check-in saved!")
+
+# --- Daily Journal Entry ---
+st.subheader("📓 Daily Journal")
+with st.form("journal_form"):
+    journal_text = st.text_area("Write about your day...")
+    journal_submit = st.form_submit_button("Save Journal Entry")
+    if journal_submit:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO journal (entry) VALUES (?)", (journal_text,))
+        st.success("Journal entry saved!")
+
+# --- Healing Entry ---
+st.subheader("🛠️ Healing Map Entry")
+with st.form("healing_form"):
+    emotional_intensity = st.slider("Emotional Intensity (1 = low, 10 = high)", 1, 10)
+    triggers = st.text_input("What triggered the emotion?")
+    tools = st.text_input("What tool did you use to regulate?")
+    healing_submit = st.form_submit_button("Save Healing Entry")
+    if healing_submit:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO healing_entries (emotional_intensity, triggers, tools) VALUES (?, ?, ?)",
+                         (emotional_intensity, triggers, tools))
+        st.success("Healing entry saved!")
+
+# --- Mood Trends ---
+st.subheader("📈 Mood Trends")
+with sqlite3.connect(DB_PATH) as conn:
+    df_mood = pd.read_sql_query("SELECT * FROM checkins", conn, parse_dates=["timestamp"])
+
+if not df_mood.empty:
+    df_mood["date"] = pd.to_datetime(df_mood["timestamp"]).dt.date
+    chart_data = df_mood.groupby("date")["mood"].agg(lambda x: x.value_counts().idxmax()).reset_index()
+    chart_data["mood"] = chart_data["mood"].str.extract(r"([a-zA-Z]+)")
+    mood_chart = alt.Chart(chart_data).mark_line(point=True).encode(
+        x="date:T",
+        y=alt.Y("mood:N", sort=None),
+        tooltip=["date", "mood"]
+    ).properties(height=300)
+    st.altair_chart(mood_chart, use_container_width=True)
+else:
+    st.info("No mood data to display yet.")
+
+# --- Journal History ---
+st.subheader("🕰️ Journal History")
+with sqlite3.connect(DB_PATH) as conn:
+    df_journal = pd.read_sql_query("SELECT * FROM journal ORDER BY timestamp DESC", conn)
+
+if not df_journal.empty:
+    for _, row in df_journal.iterrows():
+        st.markdown(f"**{row['timestamp']}**
+
+{row['entry']}")
+else:
+    st.info("No journal entries found.")
+
+# --- Healing Radial Chart ---
+st.subheader("📊 Healing Insights")
+with sqlite3.connect(DB_PATH) as conn:
+    df_healing = pd.read_sql_query("SELECT * FROM healing_entries", conn)
+
+if not df_healing.empty:
+    df_summary = pd.DataFrame({
+        "Metric": ["Avg Intensity", "Most Common Trigger", "Most Used Tool"],
+        "Value": [
+            round(df_healing["emotional_intensity"].mean(), 2),
+            df_healing["triggers"].mode()[0] if not df_healing["triggers"].mode().empty else "N/A",
+            df_healing["tools"].mode()[0] if not df_healing["tools"].mode().empty else "N/A"
+        ]
+    })
+    radial = alt.Chart(df_summary).mark_arc(innerRadius=20).encode(
+        theta=alt.Theta(field="Value", type="quantitative", stack=True),
+        color="Metric:N",
+        tooltip=["Metric", "Value"]
+    ).properties(height=300)
+    st.altair_chart(radial, use_container_width=True)
+else:
+    st.info("Not enough healing data to show insights.")
