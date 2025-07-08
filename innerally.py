@@ -216,7 +216,7 @@ else:
     # Right Column: Chat Interface
     # ----------------------
     with right_col:
-    st.subheader("💬 Chat with InnerAlly")
+        st.subheader("💬 Chat with InnerAlly")
 
     # Display messages inside an expandable container
     with st.container():
